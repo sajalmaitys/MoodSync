@@ -17,7 +17,7 @@ cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 face_cascade = cv2.CascadeClassifier(cascade_path)
 
 # Global variable to store current emotion
-current_emotion = {"emotion": "neutral", "timestamp": None, "demo_mode": True}
+current_emotion = {"emotion": "neutral", "timestamp": None, "demo_mode": False, "all_emotions": None, "confidence": 100.0}
 
 # Note: For production emotion detection, install deepface:
 # pip install deepface
@@ -72,22 +72,14 @@ EMOTION_CONFIG = {
 
 
 def detect_emotion_from_frame(frame):
-    """Detect emotion from a single frame using DeepFace (recommended)"""
+    """Detect emotion from a single frame using DeepFace"""
     try:
-        # For now, we'll use demo mode with random emotions
-        # In production, uncomment the DeepFace code below
-        
-        emotions = ["happy", "sad", "angry", "surprise", "neutral"]
-        return random.choice(emotions)
-        
-        # Production code with DeepFace:
-        # from deepface import DeepFace
-        # result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False)
-        # if result and len(result) > 0:
-        #     dominant_emotion = result[0]['dominant_emotion']
-        #     return dominant_emotion
-        # return None
-        
+        from deepface import DeepFace
+        # We process the cropped face using skip backend to ignore whole frame background noise
+        result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False, detector_backend='skip')
+        if result and len(result) > 0:
+            return result[0]
+        return None
     except Exception as e:
         print(f"Error detecting emotion: {e}")
         return None
@@ -134,15 +126,37 @@ def generate_frames():
         # Process emotion every 60 frames (approx every 2 seconds)
         frame_count += 1
         if frame_count % 60 == 0:
-            emotion = detect_emotion_from_frame(frame)
+            analysis_frame = frame
+            # If we detected faces with Haar, crop to the largest one for accuracy
+            if len(faces) > 0:
+                sorted_faces = sorted(faces, key=lambda f: f[2]*f[3], reverse=True)
+                x, y, w, h = sorted_faces[0]
+                padding = int(w * 0.2)
+                y1 = max(0, y - padding)
+                y2 = min(frame.shape[0], y + h + padding)
+                x1 = max(0, x - padding)
+                x2 = min(frame.shape[1], x + w + padding)
+                analysis_frame = frame[y1:y2, x1:x2]
+                
+            analysis = detect_emotion_from_frame(analysis_frame)
             
-            if emotion:
+            if analysis:
+                dominant_emotion = analysis.get('dominant_emotion', 'neutral')
+                emotion_dict = analysis.get('emotion', {})
+                confidence = float(emotion_dict.get(dominant_emotion, 100.0)) / 100.0
+                
+                # Scale all emotions to 0.0-1.0 and cast to python float
+                for k in list(emotion_dict.keys()):
+                    emotion_dict[k] = float(emotion_dict[k]) / 100.0
+                
                 current_emotion = {
-                    "emotion": emotion,
+                    "emotion": dominant_emotion,
+                    "confidence": confidence,
+                    "all_emotions": emotion_dict,
                     "timestamp": datetime.now().isoformat(),
-                    "demo_mode": True
+                    "demo_mode": False
                 }
-                print(f"🎭 Detected emotion: {emotion}")
+                print(f"🎭 Detected emotion: {dominant_emotion} ({confidence*100:.1f}%)")
             
             frame_count = 0  # Reset counter
         
@@ -192,19 +206,15 @@ def get_emotion():
 @app.route('/api/emotion')
 def api_emotion():
     """Get current detected emotion for frontend components"""
-    all_emotions = {
+    default_emotions = {
         "happy": 0.0, "sad": 0.0, "angry": 0.0, "fear": 0.0, 
-        "surprise": 0.0, "disgust": 0.0, "neutral": 0.0
+        "surprise": 0.0, "disgust": 0.0, "neutral": 100.0
     }
     
-    current = current_emotion.get("emotion", "neutral")
-    if current in all_emotions:
-        all_emotions[current] = 100.0
-        
     return jsonify({
-        "emotion": current,
-        "confidence": 100.0,
-        "all_emotions": all_emotions,
+        "emotion": current_emotion.get("emotion", "neutral"),
+        "confidence": current_emotion.get("confidence", 100.0),
+        "all_emotions": current_emotion.get("all_emotions") or default_emotions,
         "timestamp": current_emotion.get("timestamp"),
         "error": None,
         "running": True
