@@ -97,8 +97,20 @@ def generate_frames():
     """Generator function to yield video frames with emotion detection"""
     global current_emotion
     
+    camera_index = 0
+    # Manually parse .env to avoid requiring python-dotenv
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            for line in f:
+                if line.startswith('CAMERA_INDEX='):
+                    try:
+                        camera_index = int(line.strip().split('=')[1])
+                    except:
+                        pass
+    
     # Open camera
-    camera = cv2.VideoCapture(0)
+    camera = cv2.VideoCapture(camera_index)
     
     if not camera.isOpened():
         print("Error: Could not open camera")
@@ -164,6 +176,7 @@ def index():
 
 
 @app.route('/video_feed')
+@app.route('/api/stream')
 def video_feed():
     """Video streaming endpoint"""
     return Response(generate_frames(),
@@ -174,6 +187,28 @@ def video_feed():
 def get_emotion():
     """Get current detected emotion"""
     return jsonify(current_emotion)
+
+
+@app.route('/api/emotion')
+def api_emotion():
+    """Get current detected emotion for frontend components"""
+    all_emotions = {
+        "happy": 0.0, "sad": 0.0, "angry": 0.0, "fear": 0.0, 
+        "surprise": 0.0, "disgust": 0.0, "neutral": 0.0
+    }
+    
+    current = current_emotion.get("emotion", "neutral")
+    if current in all_emotions:
+        all_emotions[current] = 100.0
+        
+    return jsonify({
+        "emotion": current,
+        "confidence": 100.0,
+        "all_emotions": all_emotions,
+        "timestamp": current_emotion.get("timestamp"),
+        "error": None,
+        "running": True
+    })
 
 
 @app.route('/get_emotion_config/<emotion>')
