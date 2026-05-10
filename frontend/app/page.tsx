@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import EmotionDisplay from "@/components/EmotionDisplay";
 import MusicPlayer from "@/components/MusicPlayer";
@@ -32,7 +32,7 @@ export default function HomePage() {
   });
   const [theme, setTheme] = useState<EmotionTheme>(getTheme("neutral"));
   const [isConnected, setIsConnected] = useState(false);
-  const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const lastSaved = useRef<string | null>(null);
 
   const fetchEmotion = useCallback(async () => {
     try {
@@ -45,8 +45,8 @@ export default function HomePage() {
       const newTheme = getTheme(data.emotion);
       setTheme(newTheme);
 
-      if (data.timestamp && data.timestamp !== lastSaved && data.error !== "no_face") {
-        setLastSaved(data.timestamp);
+      if (data.timestamp && data.timestamp !== lastSaved.current && data.error !== "no_face") {
+        lastSaved.current = data.timestamp;
         fetch("/api/emotions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -56,7 +56,7 @@ export default function HomePage() {
     } catch {
       setIsConnected(false);
     }
-  }, [lastSaved]);
+  }, []);
 
   useEffect(() => {
     fetchEmotion();
